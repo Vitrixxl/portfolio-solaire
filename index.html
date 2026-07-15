@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vitrice Cascales — Développeur Full-Stack &amp; Data</title>
+  <meta name="description" content="Portfolio de Vitrice Cascales, développeur full-stack et data science spécialisé en TypeScript, Python et Go." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div class="hud">
+    <header class="hud-top">
+      <div class="hud-brand">
+        <span class="hud-dot"></span>
+        PORTFOLIO<span class="thin">//</span>SYSTÈME&nbsp;SOLAIRE
+      </div>
+      <button class="travel-toggle" id="travel-toggle" type="button" aria-pressed="false">
+        <span class="travel-toggle-icon" aria-hidden="true">◇</span>
+        <span id="travel-toggle-label">MODE VOYAGE</span>
+      </button>
+      <div class="hud-status" id="hud-status">EN ORBITE</div>
+    </header>
+
+    <nav class="hud-nav" id="hud-nav" aria-label="Navigation planètes"></nav>
+
+    <div class="hud-cards" id="hud-cards"></div>
+
+    <section class="travel-hud" id="travel-hud" aria-hidden="true" aria-label="Commandes du mode voyage">
+      <div class="travel-hud-heading">
+        <span class="travel-hud-signal"></span>
+        <span>MODE VOYAGE</span>
+        <strong id="travel-phase">APPROCHE DU VAISSEAU</strong>
+      </div>
+      <div class="travel-controls">
+        <div class="travel-command"><span><kbd>Z</kbd><i>/</i><kbd>↑</kbd></span><em>DESCENDRE</em></div>
+        <div class="travel-command"><span><kbd>S</kbd><i>/</i><kbd>↓</kbd></span><em>MONTER</em></div>
+        <div class="travel-command"><span><kbd>Q</kbd><i>/</i><kbd>←</kbd></span><em>GAUCHE</em></div>
+        <div class="travel-command"><span><kbd>D</kbd><i>/</i><kbd>→</kbd></span><em>DROITE</em></div>
+      </div>
+      <div class="travel-thrust"><span></span>PROPULSION AVANT AUTOMATIQUE</div>
+      <button class="travel-exit" id="travel-exit" type="button">QUITTER <kbd>ÉCHAP</kbd></button>
+    </section>
+
+    <div class="cursor-label" id="cursor-label"></div>
+
+    <footer class="hud-bottom">
+      <div class="hud-counter" id="hud-counter">00&nbsp;/&nbsp;08</div>
+      <div class="hud-hint" id="hud-hint">
+        <span class="hint-mouse"><span class="hint-wheel"></span></span>
+        SCROLL : ZOOM&nbsp;&nbsp;·&nbsp;&nbsp;CLIC SUR UN ASTRE : VOYAGE
+      </div>
+      <div class="hud-spacer"></div>
+      <div class="hud-ctrl" id="hud-zoom">
+        <span class="ctrl-label">ZOOM</span>
+        <button type="button" id="zoom-out" aria-label="Dézoomer">−</button>
+        <input type="range" id="zoom-range" min="0" max="100" value="50" aria-label="Niveau de zoom" />
+        <button type="button" id="zoom-in" aria-label="Zoomer">+</button>
+      </div>
+      <div class="hud-ctrl" id="hud-speed">
+        <span class="ctrl-label">VITESSE</span>
+        <button type="button" data-speed="0.5">×½</button>
+        <button type="button" data-speed="1" class="active">×1</button>
+        <button type="button" data-speed="2">×2</button>
+        <button type="button" data-speed="4">×4</button>
+      </div>
+      <div class="hud-coords" id="hud-coords">SOL · 0.00 UA</div>
+    </footer>
+  </div>
+
+  <div class="vignette"></div>
+  <div class="grain"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
