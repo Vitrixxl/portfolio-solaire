@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { PLANETS, STOPS } from './content.js'
 import { createUI } from './ui.js'
 
@@ -171,6 +172,10 @@ scene.add(glow)
 // --- planètes
 const loadingManager = new THREE.LoadingManager()
 const gltfLoader = new GLTFLoader(loadingManager)
+const dracoLoader = new DRACOLoader(loadingManager)
+dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/`)
+dracoLoader.setDecoderConfig({ type: 'wasm' })
+gltfLoader.setDRACOLoader(dracoLoader)
 const textureLoader = new THREE.TextureLoader()
 const textureCache = new Map()
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy()
@@ -501,78 +506,15 @@ function makeStars(count) {
 const stars = makeStars(2600)
 scene.add(stars)
 
-// --- vaisseau du mode voyage (avant local = axe -Z)
+// --- navette NASA du mode voyage (avant local = axe -Z)
 function createSpacecraft() {
   const ship = new THREE.Group()
   const visual = new THREE.Group()
-  ship.name = 'Vaisseau — mode voyage'
+  ship.name = 'Navette spatiale NASA — mode voyage'
   ship.add(visual)
 
-  const hullMaterial = new THREE.MeshStandardMaterial({
-    color: 0xc7d0dc,
-    metalness: 0.72,
-    roughness: 0.3,
-  })
-  const darkMaterial = new THREE.MeshStandardMaterial({
-    color: 0x141b28,
-    metalness: 0.85,
-    roughness: 0.24,
-  })
-  const wingMaterial = new THREE.MeshStandardMaterial({
-    color: 0x59687c,
-    metalness: 0.78,
-    roughness: 0.32,
-    side: THREE.DoubleSide,
-  })
-  const cockpitMaterial = new THREE.MeshStandardMaterial({
-    color: 0x15364a,
-    emissive: 0x0b789b,
-    emissiveIntensity: 0.8,
-    metalness: 0.35,
-    roughness: 0.12,
-  })
-
-  const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.82, 3.6, 16), hullMaterial)
-  fuselage.rotation.x = -Math.PI / 2
-  visual.add(fuselage)
-
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.63, 1.5, 16), hullMaterial)
-  nose.rotation.x = -Math.PI / 2
-  nose.position.z = -2.55
-  visual.add(nose)
-
-  const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.72, 24, 16), cockpitMaterial)
-  cockpit.scale.set(0.72, 0.48, 1.2)
-  cockpit.position.set(0, 0.5, -0.72)
-  visual.add(cockpit)
-
-  const wingShape = new THREE.Shape()
-  wingShape.moveTo(-0.5, -0.75)
-  wingShape.lineTo(-3.1, 1.25)
-  wingShape.lineTo(-0.62, 0.92)
-  wingShape.lineTo(0.62, 0.92)
-  wingShape.lineTo(3.1, 1.25)
-  wingShape.lineTo(0.5, -0.75)
-  wingShape.closePath()
-  const wings = new THREE.Mesh(new THREE.ShapeGeometry(wingShape), wingMaterial)
-  wings.rotation.x = Math.PI / 2
-  wings.position.y = -0.15
-  visual.add(wings)
-
-  for (const side of [-1, 1]) {
-    const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.34, 1.25, 12), darkMaterial)
-    engine.rotation.x = Math.PI / 2
-    engine.position.set(side * 0.48, -0.14, 1.65)
-    visual.add(engine)
-
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.3, 0.055, 8, 20),
-      new THREE.MeshBasicMaterial({ color: 0x81d9ff })
-    )
-    ring.position.set(side * 0.48, -0.14, 2.28)
-    visual.add(ring)
-  }
-
+  // Les flammes restent générées : elles matérialisent la propulsion du mode
+  // interactif, tandis que toute la structure du vaisseau vient du modèle NASA.
   const flameMaterial = new THREE.MeshBasicMaterial({
     color: 0x5bc8ff,
     transparent: true,
@@ -581,24 +523,22 @@ function createSpacecraft() {
     depthWrite: false,
   })
   const flames = []
-  for (const side of [-1, 1]) {
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.23, 1.8, 12), flameMaterial)
+  for (const [x, y] of [[-0.28, -0.12], [0.28, -0.12], [0, 0.25]]) {
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.35, 12), flameMaterial)
     flame.rotation.x = Math.PI / 2
-    flame.position.set(side * 0.48, -0.14, 3.12)
+    flame.position.set(x, y, 3.18)
     visual.add(flame)
     flames.push(flame)
   }
 
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.35, 1.25), wingMaterial)
-  tail.position.set(0, 0.62, 1.25)
-  visual.add(tail)
-
-  const engineLight = new THREE.PointLight(0x54c9ff, 5, 9, 2)
-  engineLight.position.set(0, -0.1, 2.8)
+  const engineLight = new THREE.PointLight(0x54c9ff, 4, 8, 2)
+  engineLight.position.set(0, 0, 2.8)
   visual.add(engineLight)
 
   ship.userData.visual = visual
   ship.userData.flames = flames
+  ship.userData.engineLight = engineLight
+  ship.userData.ready = false
   ship.visible = false
   return ship
 }
@@ -612,11 +552,22 @@ scene.add(spacecraft)
 
 const travel = {
   active: false,
+  pendingStart: false,
   phase: 'idle',
   phaseStarted: 0,
   arrivalDuration: 2.8,
+  orbitDepartureDuration: 2.5,
+  orbitCaptureDuration: 3.1,
   exitDuration: 1.35,
   speed: 14,
+  heading: 0,
+  pitch: 0,
+  aimedStop: null,
+  orbitStop: null,
+  orbitRadius: 0,
+  orbitAngle: 0,
+  orbitStartAngle: 0,
+  orbitEndAngle: 0,
   keys: new Set(),
   steering: new THREE.Vector2(),
   cameraStart: new THREE.Vector3(),
@@ -626,10 +577,69 @@ const travel = {
   shipStart: new THREE.Vector3(),
   shipEnd: new THREE.Vector3(),
   flightDirection: new THREE.Vector3(),
+  approachDirection: new THREE.Vector3(),
   approachQuaternion: new THREE.Quaternion(),
   flightQuaternion: new THREE.Quaternion(),
+  shipStartQuaternion: new THREE.Quaternion(),
+  controlA: new THREE.Vector3(),
+  controlB: new THREE.Vector3(),
+  previousShipPosition: new THREE.Vector3(),
   exitCameraStart: new THREE.Vector3(),
   exitLookStart: new THREE.Vector3(),
+}
+
+const spacecraftOrbit = {
+  active: false,
+  stop: null,
+  angle: 0,
+  radius: 0,
+  height: 0,
+  speed: 0.42,
+}
+
+function loadSpacecraftModel() {
+  const url = `${import.meta.env.BASE_URL}models/spacecraft/nasa-space-shuttle.glb`
+  gltfLoader.load(url, (gltf) => {
+    const model = gltf.scene
+    model.name = 'NASA Space Shuttle (A)'
+
+    // La navette NASA est déjà orientée nez vers -Z, qui est aussi l'avant du
+    // mode de vol. On conserve ce sens puis on normalise uniquement sa taille.
+    model.rotation.y = 0
+    model.updateMatrixWorld(true)
+    const rawSize = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3())
+    model.scale.setScalar(5.8 / Math.max(rawSize.x, rawSize.y, rawSize.z))
+    model.updateMatrixWorld(true)
+    const center = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3())
+    model.position.sub(center)
+    model.updateMatrixWorld(true)
+
+    model.traverse((object) => {
+      if (!object.isMesh) return
+      const materials = Array.isArray(object.material) ? object.material : [object.material]
+      for (const material of materials) {
+        for (const slot of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap']) {
+          if (material[slot]) material[slot].anisotropy = maxAnisotropy
+        }
+      }
+    })
+
+    spacecraft.userData.visual.add(model)
+    spacecraft.userData.model = model
+    spacecraft.userData.ready = true
+    if (travel.pendingStart) {
+      travel.pendingStart = false
+      startTravel()
+    }
+  }, undefined, (error) => {
+    console.error('Impossible de charger la navette spatiale NASA.', error)
+    if (travel.pendingStart) ui.setTravelPhase('VAISSEAU INDISPONIBLE')
+  })
+}
+
+function setSpacecraftThrust(active) {
+  spacecraft.userData.flames.forEach((flame) => { flame.visible = active })
+  spacecraft.userData.engineLight.visible = active
 }
 
 // grain statique généré une fois (voir style.css)
@@ -668,6 +678,7 @@ const ui = createUI({
   onTravelToggle: () => toggleTravel(),
 })
 ui.setActive(0)
+loadSpacecraftModel()
 
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 
@@ -680,6 +691,16 @@ const _travelRight = new THREE.Vector3()
 const _travelCameraUp = new THREE.Vector3()
 const _travelApproach = new THREE.Vector3()
 const _travelShipUp = new THREE.Vector3()
+const _orbitPlanetPosition = new THREE.Vector3()
+const _orbitTarget = new THREE.Vector3()
+const _orbitTangent = new THREE.Vector3()
+const _orbitRelative = new THREE.Vector3()
+const _shipMotion = new THREE.Vector3()
+const _shipRight = new THREE.Vector3()
+const _shipUpStable = new THREE.Vector3()
+const _shipBack = new THREE.Vector3()
+const _aimDirection = new THREE.Vector3()
+const _shipRotationMatrix = new THREE.Matrix4()
 
 // position/cible caméra pour une étape donnée (recalculées chaque frame,
 // car les planètes bougent)
@@ -708,12 +729,108 @@ function anchorFor(stop, outPos, outLook) {
   outLook.copy(_pos).addScaledVector(_side, -r * shift)
 }
 
+function orbitPose(stop, angle, radius, height, outPosition, outTangent) {
+  planets[stop - 1].mesh.getWorldPosition(_orbitPlanetPosition)
+  outPosition.set(
+    Math.cos(angle) * radius,
+    Math.sin(angle) * height,
+    Math.sin(angle) * radius
+  ).add(_orbitPlanetPosition)
+  outTangent.set(
+    -Math.sin(angle) * radius,
+    Math.cos(angle) * height,
+    Math.cos(angle) * radius
+  ).normalize()
+}
+
+function cubicBezier(p0, p1, p2, p3, t, out) {
+  const inv = 1 - t
+  out.copy(p0).multiplyScalar(inv * inv * inv)
+    .addScaledVector(p1, 3 * inv * inv * t)
+    .addScaledVector(p2, 3 * inv * t * t)
+    .addScaledVector(p3, t * t * t)
+  return out
+}
+
+function quaternionForDirection(direction, out) {
+  _shipRight.crossVectors(direction, UP)
+  if (_shipRight.lengthSq() < 0.000001) _shipRight.set(1, 0, 0)
+  else _shipRight.normalize()
+  _shipUpStable.crossVectors(_shipRight, direction).normalize()
+  _shipBack.copy(direction).negate()
+  _shipRotationMatrix.makeBasis(_shipRight, _shipUpStable, _shipBack)
+  return out.setFromRotationMatrix(_shipRotationMatrix)
+}
+
+function setTravelAngles(direction) {
+  travel.pitch = Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1))
+  travel.heading = Math.atan2(-direction.x, -direction.z)
+}
+
+function directionFromTravelAngles(out) {
+  const horizontal = Math.cos(travel.pitch)
+  return out.set(
+    -Math.sin(travel.heading) * horizontal,
+    Math.sin(travel.pitch),
+    -Math.cos(travel.heading) * horizontal
+  ).normalize()
+}
+
+function findAimedPlanet() {
+  _travelForwardNow.copy(SHIP_FORWARD).applyQuaternion(spacecraft.quaternion).normalize()
+  let bestStop = null
+  let bestAlignment = 0.985 // cône d'environ 10 degrés autour du nez
+  planets.forEach((planet, index) => {
+    planet.mesh.getWorldPosition(_orbitPlanetPosition)
+    _aimDirection.copy(_orbitPlanetPosition).sub(spacecraft.position)
+    if (_aimDirection.lengthSq() < Math.pow(planet.data.radius * 1.25, 2)) return
+    const alignment = _aimDirection.normalize().dot(_travelForwardNow)
+    if (alignment > bestAlignment) {
+      bestAlignment = alignment
+      bestStop = index + 1
+    }
+  })
+  return bestStop
+}
+
+function updateSpacecraftOrbit(dt) {
+  if (!spacecraftOrbit.active) return
+  spacecraftOrbit.angle += spacecraftOrbit.speed * dt
+  orbitPose(
+    spacecraftOrbit.stop,
+    spacecraftOrbit.angle,
+    spacecraftOrbit.radius,
+    spacecraftOrbit.height,
+    spacecraft.position,
+    _orbitTangent
+  )
+  quaternionForDirection(_orbitTangent, spacecraft.quaternion)
+}
+
+function clearSpacecraftOrbit() {
+  spacecraftOrbit.active = false
+  spacecraftOrbit.stop = null
+  spacecraft.visible = false
+  setSpacecraftThrust(false)
+}
+
 function startTravel() {
   if (travel.active) return
 
+  if (!spacecraft.userData.ready) {
+    travel.pendingStart = true
+    ui.dismissHint()
+    ui.hideCards()
+    ui.setTravelMode(true)
+    ui.setTravelPhase('CHARGEMENT DE LA NAVETTE NASA')
+    return
+  }
+
+  const departingOrbit = spacecraftOrbit.active
   travel.active = true
-  travel.phase = 'arrival'
+  travel.phase = departingOrbit ? 'orbitDeparture' : 'arrival'
   travel.phaseStarted = clock.elapsedTime
+  travel.aimedStop = null
   travel.keys.clear()
   travel.steering.set(0, 0)
   animating = false
@@ -729,26 +846,51 @@ function startTravel() {
   travel.cameraStart.copy(camera.position)
   travel.lookStart.copy(lookCurrent)
   travel.shipEnd.copy(camera.position).addScaledVector(_travelView, 10)
-  travel.shipStart.copy(camera.position)
-    .addScaledVector(_travelView, 44)
-    .addScaledVector(_travelRight, 10)
-    .addScaledVector(_travelCameraUp, 6)
 
-  // À proximité d'une planète, le vaisseau repart tangentiellement à son
-  // orbite pour ne pas foncer automatiquement dans l'astre observé.
-  if (current > 0) {
-    planets[current - 1].mesh.getWorldPosition(_pos)
-    travel.flightDirection.crossVectors(UP, _pos).normalize()
-    if (travel.flightDirection.lengthSq() < 0.5) travel.flightDirection.copy(_travelRight)
-    if (travel.flightDirection.dot(_travelRight) < 0) travel.flightDirection.negate()
+  if (departingOrbit) {
+    travel.orbitStop = spacecraftOrbit.stop
+    travel.shipStart.copy(spacecraft.position)
+    travel.shipStartQuaternion.copy(spacecraft.quaternion)
+    orbitPose(
+      spacecraftOrbit.stop,
+      spacecraftOrbit.angle,
+      spacecraftOrbit.radius,
+      spacecraftOrbit.height,
+      _orbitTarget,
+      _orbitTangent
+    )
+    travel.flightDirection.copy(_orbitTangent).addScaledVector(UP, 0.04).normalize()
+    travel.controlA.copy(travel.shipStart)
+      .addScaledVector(travel.flightDirection, Math.max(spacecraftOrbit.radius * 1.8, 6))
+      .addScaledVector(UP, spacecraftOrbit.height * 0.5)
+    travel.controlB.copy(travel.shipEnd).addScaledVector(travel.flightDirection, -8)
+    spacecraftOrbit.active = false
+    spacecraftOrbit.stop = null
   } else {
-    travel.flightDirection.copy(_travelRight)
-  }
-  travel.flightDirection.addScaledVector(UP, 0.06).normalize()
+    travel.shipStart.copy(camera.position)
+      .addScaledVector(_travelView, 44)
+      .addScaledVector(_travelRight, 10)
+      .addScaledVector(_travelCameraUp, 6)
 
-  _travelApproach.copy(travel.shipEnd).sub(travel.shipStart).normalize()
-  travel.approachQuaternion.setFromUnitVectors(SHIP_FORWARD, _travelApproach)
-  travel.flightQuaternion.setFromUnitVectors(SHIP_FORWARD, travel.flightDirection)
+    // À proximité d'une planète, la navette repart tangentiellement à son
+    // orbite pour ne pas foncer automatiquement dans l'astre observé.
+    if (current > 0) {
+      planets[current - 1].mesh.getWorldPosition(_pos)
+      travel.flightDirection.crossVectors(UP, _pos).normalize()
+      if (travel.flightDirection.lengthSq() < 0.5) travel.flightDirection.copy(_travelRight)
+      if (travel.flightDirection.dot(_travelRight) < 0) travel.flightDirection.negate()
+    } else {
+      travel.flightDirection.copy(_travelRight)
+    }
+    travel.flightDirection.addScaledVector(UP, 0.06).normalize()
+    _travelApproach.copy(travel.shipEnd).sub(travel.shipStart).normalize()
+    travel.approachDirection.copy(_travelApproach)
+    quaternionForDirection(_travelApproach, travel.approachQuaternion)
+    travel.shipStartQuaternion.copy(travel.approachQuaternion)
+  }
+
+  quaternionForDirection(travel.flightDirection, travel.flightQuaternion)
+  setTravelAngles(travel.flightDirection)
   _travelShipUp.copy(SHIP_UP).applyQuaternion(travel.flightQuaternion)
 
   travel.cameraEnd.copy(travel.shipEnd)
@@ -758,20 +900,56 @@ function startTravel() {
 
   spacecraft.visible = true
   spacecraft.position.copy(travel.shipStart)
-  spacecraft.quaternion.copy(travel.approachQuaternion)
-  spacecraft.scale.setScalar(SHIP_SCALE * 0.55)
+  spacecraft.quaternion.copy(travel.shipStartQuaternion)
+  spacecraft.scale.setScalar(departingOrbit ? SHIP_SCALE : SHIP_SCALE * 0.55)
   spacecraft.userData.visual.rotation.set(0, 0, 0)
+  setSpacecraftThrust(true)
+  travel.previousShipPosition.copy(spacecraft.position)
 
   ui.dismissHint()
   ui.hideCards()
   ui.setTravelMode(true)
-  ui.setTravelPhase('APPROCHE DU VAISSEAU')
+  ui.setTravelPhase(departingOrbit ? 'DÉPART DE L’ORBITE' : 'APPROCHE DE LA NAVETTE NASA')
+}
+
+function beginOrbitCapture(stop = travel.aimedStop) {
+  if (!travel.active || travel.phase !== 'flight' || !Number.isInteger(stop) || stop < 1) return
+
+  const planet = planets[stop - 1]
+  planet.mesh.getWorldPosition(_orbitPlanetPosition)
+  _orbitRelative.copy(spacecraft.position).sub(_orbitPlanetPosition)
+  if (Math.hypot(_orbitRelative.x, _orbitRelative.z) < 0.001) {
+    _orbitRelative.copy(_travelRight)
+  }
+
+  travel.phase = 'orbitCapture'
+  travel.phaseStarted = clock.elapsedTime
+  travel.orbitStop = stop
+  travel.orbitRadius = Math.max(planet.data.radius * 2.25, 4.2)
+  travel.orbitStartAngle = Math.atan2(_orbitRelative.z, _orbitRelative.x)
+  travel.orbitEndAngle = travel.orbitStartAngle + 1.35
+  travel.shipStart.copy(spacecraft.position)
+  travel.shipStartQuaternion.copy(spacecraft.quaternion)
+  travel.cameraStart.copy(camera.position)
+  travel.lookStart.copy(lookCurrent)
+  travel.previousShipPosition.copy(spacecraft.position)
+  travel.keys.clear()
+  travel.aimedStop = null
+
+  _travelForwardNow.copy(SHIP_FORWARD).applyQuaternion(spacecraft.quaternion).normalize()
+  const distance = spacecraft.position.distanceTo(_orbitPlanetPosition)
+  travel.controlA.copy(spacecraft.position)
+    .addScaledVector(_travelForwardNow, THREE.MathUtils.clamp(distance * 0.3, 6, 28))
+    .addScaledVector(UP, Math.max(planet.data.radius * 0.35, 0.8))
+
+  ui.setTravelPhase(`MISE EN ORBITE — ${planet.data.name.toUpperCase()}`)
 }
 
 function stopTravel() {
   if (!travel.active || travel.phase === 'exit') return
   travel.phase = 'exit'
   travel.phaseStarted = clock.elapsedTime
+  travel.aimedStop = null
   travel.keys.clear()
   travel.exitCameraStart.copy(camera.position)
   travel.exitLookStart.copy(lookCurrent)
@@ -779,14 +957,19 @@ function stopTravel() {
 }
 
 function toggleTravel() {
-  if (travel.active) stopTravel()
+  if (travel.pendingStart) {
+    travel.pendingStart = false
+    ui.setTravelMode(false)
+    ui.showCard(current)
+  } else if (travel.active) stopTravel()
   else startTravel()
 }
 
 function go(i) {
-  if (travel.active) return
+  if (travel.active || travel.pendingStart) return
   const target = THREE.MathUtils.clamp(i, 0, STOP_COUNT - 1)
   if (animating || target === current) return
+  if (spacecraftOrbit.active) clearSpacecraftOrbit()
   animating = true
   ui.dismissHint()
   ui.hideCards()
@@ -802,7 +985,7 @@ function go(i) {
 
 // molette = zoom / dézoom (la navigation se fait au clic sur les planètes)
 window.addEventListener('wheel', (e) => {
-  if (travel.active) return
+  if (travel.active || travel.pendingStart) return
   ui.dismissHint()
   zoomRange.value = THREE.MathUtils.clamp(Number(zoomRange.value) - e.deltaY * 0.05, 0, 100)
   applyZoomSlider()
@@ -815,6 +998,11 @@ const inputKey = (e) => (e.key.length === 1 ? e.key.toLowerCase() : e.key)
 window.addEventListener('keydown', (e) => {
   const key = inputKey(e)
   if (travel.active) {
+    if (key === 'o' && travel.phase === 'flight' && travel.aimedStop !== null) {
+      e.preventDefault()
+      beginOrbitCapture()
+      return
+    }
     if (key === 'Escape') {
       e.preventDefault()
       stopTravel()
@@ -839,10 +1027,10 @@ window.addEventListener('blur', () => travel.keys.clear())
 // tactile
 let touchY = null
 window.addEventListener('touchstart', (e) => {
-  if (!travel.active) touchY = e.touches[0].clientY
+  if (!travel.active && !travel.pendingStart) touchY = e.touches[0].clientY
 }, { passive: true })
 window.addEventListener('touchend', (e) => {
-  if (travel.active) return
+  if (travel.active || travel.pendingStart) return
   if (touchY === null) return
   const dy = touchY - e.changedTouches[0].clientY
   if (Math.abs(dy) > 45) go(current + Math.sign(dy))
@@ -863,7 +1051,7 @@ let downX = 0
 let downY = 0
 
 canvas.addEventListener('pointerdown', (e) => {
-  if (travel.active) return
+  if (travel.active || travel.pendingStart) return
   downX = e.clientX
   downY = e.clientY
   if (e.pointerType === 'touch') return // sur tactile, le swipe sert à naviguer
@@ -895,7 +1083,7 @@ window.addEventListener('pointerleave', () => { cursorOnCanvas = false })
 document.addEventListener('mouseleave', () => { cursorOnCanvas = false })
 
 window.addEventListener('pointerup', (e) => {
-  if (travel.active) return
+  if (travel.active || travel.pendingStart) return
   dragging = false
   canvas.classList.remove('dragging')
   // clic (et non drag) sur le canvas : voyage vers l'astre visé
@@ -957,26 +1145,56 @@ function hasTravelKey(...keys) {
   return keys.some((key) => travel.keys.has(key))
 }
 
-function updateSpacecraftFx(t, turn = 0, dt = 0) {
+function updateSpacecraftFx(t) {
   const pulse = 0.82 + Math.sin(t * 24) * 0.13 + Math.sin(t * 9.3) * 0.05
   spacecraft.userData.flames.forEach((flame, i) => {
     flame.scale.y = pulse + i * 0.04
   })
-  const visual = spacecraft.userData.visual
-  visual.rotation.z += (turn * 0.38 - visual.rotation.z) * (1 - Math.exp(-7 * dt))
+  // Aucun roulis visuel : la navette garde toujours ses ailes horizontales.
+  spacecraft.userData.visual.rotation.set(0, 0, 0)
 }
 
 function updateTravelCamera(dt, t) {
-  if (travel.phase === 'arrival') {
+  if (travel.phase === 'orbitDeparture') {
+    const u = THREE.MathUtils.clamp((t - travel.phaseStarted) / travel.orbitDepartureDuration, 0, 1)
+    const e = easeInOut(u)
+    cubicBezier(
+      travel.shipStart,
+      travel.controlA,
+      travel.controlB,
+      travel.shipEnd,
+      e,
+      spacecraft.position
+    )
+    _shipMotion.copy(spacecraft.position).sub(travel.previousShipPosition)
+    if (_shipMotion.lengthSq() > 0.000001) {
+      quaternionForDirection(_shipMotion.normalize(), spacecraft.quaternion)
+    }
+    travel.previousShipPosition.copy(spacecraft.position)
+
+    const cameraEase = easeInOut(THREE.MathUtils.smoothstep(u, 0.12, 1))
+    camera.position.lerpVectors(travel.cameraStart, travel.cameraEnd, cameraEase)
+    _travelLookNow.lerpVectors(spacecraft.position, travel.lookEnd, THREE.MathUtils.smoothstep(u, 0.62, 1))
+    lookCurrent.lerpVectors(travel.lookStart, _travelLookNow, THREE.MathUtils.smoothstep(u, 0.04, 0.88))
+    updateSpacecraftFx(t, 0, dt)
+
+    if (u >= 1) {
+      spacecraft.quaternion.copy(travel.flightQuaternion)
+      travel.phase = 'flight'
+      travel.phaseStarted = t
+      ui.setTravelPhase('PILOTAGE LIBRE')
+    }
+  } else if (travel.phase === 'arrival') {
     const u = THREE.MathUtils.clamp((t - travel.phaseStarted) / travel.arrivalDuration, 0, 1)
     const e = easeInOut(u)
     spacecraft.position.lerpVectors(travel.shipStart, travel.shipEnd, e)
     spacecraft.position.addScaledVector(_travelCameraUp, Math.sin(u * Math.PI) * 2.2)
-    spacecraft.quaternion.slerpQuaternions(
-      travel.approachQuaternion,
-      travel.flightQuaternion,
+    _shipMotion.lerpVectors(
+      travel.approachDirection,
+      travel.flightDirection,
       THREE.MathUtils.smoothstep(u, 0.38, 1)
-    )
+    ).normalize()
+    quaternionForDirection(_shipMotion, spacecraft.quaternion)
     spacecraft.scale.setScalar(SHIP_SCALE * (0.55 + e * 0.45))
 
     const cameraEase = easeInOut(THREE.MathUtils.smoothstep(u, 0.18, 1))
@@ -1007,13 +1225,18 @@ function updateTravelCamera(dt, t) {
     travel.steering.x += (turn - travel.steering.x) * steerEase
     travel.steering.y += (vertical - travel.steering.y) * steerEase
 
-    // Axe vertical volontairement inversé : Z/↑ pique vers le bas,
-    // S/↓ cabre vers le haut. L'avant du vaisseau est son axe local -Z.
-    spacecraft.rotateY(travel.steering.x * 0.92 * dt)
-    spacecraft.rotateX(-travel.steering.y * 0.78 * dt)
-    spacecraft.quaternion.normalize()
+    // La direction est reconstruite depuis un cap et une assiette bornée :
+    // Z/↑ pique vers le bas, S/↓ cabre vers le haut, sans jamais introduire
+    // de roulis. Les ailes restent donc parallèles à l'horizon du système.
+    travel.heading += travel.steering.x * 0.92 * dt
+    travel.pitch = THREE.MathUtils.clamp(
+      travel.pitch - travel.steering.y * 0.78 * dt,
+      -1.15,
+      1.15
+    )
+    directionFromTravelAngles(_travelForwardNow)
+    quaternionForDirection(_travelForwardNow, spacecraft.quaternion)
 
-    _travelForwardNow.copy(SHIP_FORWARD).applyQuaternion(spacecraft.quaternion).normalize()
     _travelUpNow.copy(SHIP_UP).applyQuaternion(spacecraft.quaternion).normalize()
     spacecraft.position.addScaledVector(_travelForwardNow, travel.speed * dt)
 
@@ -1024,7 +1247,71 @@ function updateTravelCamera(dt, t) {
     const followEase = 1 - Math.exp(-5.5 * dt)
     camera.position.lerp(_travelCameraTarget, followEase)
     lookCurrent.lerp(_travelLookTarget, followEase)
+    travel.aimedStop = findAimedPlanet()
     updateSpacecraftFx(t, travel.steering.x, dt)
+  } else if (travel.phase === 'orbitCapture') {
+    const planet = planets[travel.orbitStop - 1]
+    const u = THREE.MathUtils.clamp((t - travel.phaseStarted) / travel.orbitCaptureDuration, 0, 1)
+    const e = easeInOut(u)
+    const height = Math.max(planet.data.radius * 0.5, 0.75)
+    travel.orbitAngle = THREE.MathUtils.lerp(travel.orbitStartAngle, travel.orbitEndAngle, e)
+    orbitPose(
+      travel.orbitStop,
+      travel.orbitAngle,
+      travel.orbitRadius,
+      height,
+      _orbitTarget,
+      _orbitTangent
+    )
+    travel.controlB.copy(_orbitTarget)
+      .addScaledVector(_orbitTangent, -travel.orbitRadius * 1.8)
+      .addScaledVector(UP, height * 0.45)
+    cubicBezier(
+      travel.shipStart,
+      travel.controlA,
+      travel.controlB,
+      _orbitTarget,
+      e,
+      spacecraft.position
+    )
+
+    _shipMotion.copy(spacecraft.position).sub(travel.previousShipPosition)
+    if (_shipMotion.lengthSq() > 0.000001) {
+      quaternionForDirection(_shipMotion.normalize(), spacecraft.quaternion)
+    }
+    travel.previousShipPosition.copy(spacecraft.position)
+
+    anchorFor(travel.orbitStop, _posB, _lookB)
+    const cameraEase = easeInOut(THREE.MathUtils.smoothstep(u, 0.2, 1))
+    camera.position.lerpVectors(travel.cameraStart, _posB, cameraEase)
+    lookCurrent.lerpVectors(travel.lookStart, _lookB, cameraEase)
+    updateSpacecraftFx(t, 0, dt)
+
+    if (u >= 1) {
+      current = travel.orbitStop
+      travel.active = false
+      travel.phase = 'idle'
+      travel.aimedStop = null
+      travel.keys.clear()
+      spacecraftOrbit.active = true
+      spacecraftOrbit.stop = current
+      spacecraftOrbit.angle = travel.orbitEndAngle
+      spacecraftOrbit.radius = travel.orbitRadius
+      spacecraftOrbit.height = height
+      spacecraft.scale.setScalar(SHIP_SCALE)
+      spacecraft.userData.visual.rotation.set(0, 0, 0)
+      setSpacecraftThrust(false)
+      yawTarget = 0
+      pitchTarget = 0
+      yaw = 0
+      pitch = 0
+      autoYaw = 0
+      camTarget.copy(_posB)
+      lookTarget.copy(_lookB)
+      ui.setTravelMode(false)
+      ui.setActive(current)
+      ui.showCard(current)
+    }
   } else if (travel.phase === 'exit') {
     const u = THREE.MathUtils.clamp((t - travel.phaseStarted) / travel.exitDuration, 0, 1)
     const e = easeInOut(u)
@@ -1043,6 +1330,7 @@ function updateTravelCamera(dt, t) {
       spacecraft.visible = false
       spacecraft.scale.setScalar(SHIP_SCALE)
       spacecraft.userData.visual.rotation.set(0, 0, 0)
+      setSpacecraftThrust(false)
       ui.setTravelMode(false)
       ui.showCard(current)
     }
@@ -1083,6 +1371,8 @@ function tick() {
       p.moon.position.y += Math.sin(p.moonAngle * 0.7) * p.data.radius * 0.4
     }
   }
+
+  if (spacecraftOrbit.active && !travel.active) updateSpacecraftOrbit(dt)
 
   if (travel.active) {
     updateTravelCamera(dt, t)
@@ -1150,10 +1440,12 @@ function tick() {
   // ---- curseur WebGL + réticule de visée ----
   const cw = window.innerWidth
   const ch = window.innerHeight
-  const picked = !travel.active && !dragging && cursorOnCanvas && !animating
+  const picked = !travel.active && !travel.pendingStart && !dragging && cursorOnCanvas && !animating
     ? pickStop(mouse.x, -mouse.y)
     : null
   hoveredStop = picked !== null && picked !== current ? picked : null
+  const orbitAimStop = travel.active && travel.phase === 'flight' ? travel.aimedStop : null
+  const reticleStop = orbitAimStop ?? hoveredStop
 
   // petit curseur : suit la souris avec un léger retard
   cursorTargetPos.set(pointerPx.x - cw / 2, ch / 2 - pointerPx.y)
@@ -1164,7 +1456,7 @@ function tick() {
   const ringScaleTarget = dragging ? 6 : hoveredStop !== null ? 5 : 10
   cursorRingScale += (ringScaleTarget - cursorRingScale) * (1 - Math.exp(-12 * dt))
   cursorRing.scale.setScalar(cursorRingScale)
-  const cursorOpacityTarget = !travel.active && cursorOnCanvas ? 0.9 : 0
+  const cursorOpacityTarget = !travel.active && !travel.pendingStart && cursorOnCanvas ? 0.9 : 0
   cursorLineMat.opacity += (cursorOpacityTarget - cursorLineMat.opacity) * (1 - Math.exp(-14 * dt))
   cursorDotMat.opacity = cursorLineMat.opacity
 
@@ -1173,10 +1465,10 @@ function tick() {
   let retPosY = cursorPos.y
   let retScaleTarget = 16
   let retOpacityTarget = 0
-  if (hoveredStop !== null) {
-    const isSun = hoveredStop === 0
-    const obj = isSun ? sun : planets[hoveredStop - 1].mesh
-    const r = isSun ? SUN_RADIUS : planets[hoveredStop - 1].data.radius
+  if (reticleStop !== null) {
+    const isSun = reticleStop === 0
+    const obj = isSun ? sun : planets[reticleStop - 1].mesh
+    const r = isSun ? SUN_RADIUS : planets[reticleStop - 1].data.radius
     obj.getWorldPosition(_pos)
     _v.copy(_pos).project(camera)
     if (_v.z < 1) {
@@ -1188,15 +1480,18 @@ function tick() {
       retScaleTarget = Math.max(pxR * 1.35, 30)
       retOpacityTarget = 0.85
 
-      labelEl.textContent = `${STOPS[hoveredStop].name} — ${STOPS[hoveredStop].section}`.toUpperCase()
+      labelEl.textContent = orbitAimStop !== null
+        ? `${STOPS[reticleStop].name} — O · ALLER EN ORBITE`
+        : `${STOPS[reticleStop].name} — ${STOPS[reticleStop].section}`.toUpperCase()
       const lx = retPosX + cw / 2 + retScaleTarget * 0.8 + 18
       const ly = ch / 2 - retPosY - retScaleTarget * 0.8 - 10
-      labelEl.style.transform = `translate(${Math.min(lx, cw - 240)}px, ${Math.max(ly, 60)}px)`
+      labelEl.style.transform = `translate(${Math.min(lx, cw - 320)}px, ${Math.max(ly, 60)}px)`
     }
   }
-  labelEl.classList.toggle('visible', hoveredStop !== null)
+  labelEl.classList.toggle('visible', reticleStop !== null)
+  labelEl.classList.toggle('orbit-action', orbitAimStop !== null)
   const kRet = 1 - Math.exp(-14 * dt)
-  if (hoveredStop !== null && hoveredStop === lastHoverStop) {
+  if (reticleStop !== null && reticleStop === lastHoverStop) {
     // verrouillé sur l'astre : suivi exact, sinon l'amorti traîne derrière
     // la planète en mouvement et le réticule paraît décentré
     reticlePos.set(retPosX, retPosY)
@@ -1206,7 +1501,7 @@ function tick() {
     reticlePos.y += (retPosY - reticlePos.y) * kRet
     reticleScale += (retScaleTarget - reticleScale) * kRet
   }
-  lastHoverStop = hoveredStop
+  lastHoverStop = reticleStop
   reticleOpacity += (retOpacityTarget - reticleOpacity) * kRet
   reticleGroup.position.set(reticlePos.x, reticlePos.y, 0)
   reticleGroup.scale.setScalar(reticleScale)

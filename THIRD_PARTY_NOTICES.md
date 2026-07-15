@@ -22,6 +22,17 @@ Source pages:
 Use of these assets is subject to the
 [NASA Images and Media Usage Guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/).
 
+## NASA Space Shuttle model
+
+`public/models/spacecraft/nasa-space-shuttle.glb` is the official NASA
+“Space Shuttle (A)” 3D resource, credited to NASA/Michael D. Carbajal.
+
+- [NASA source and download page](https://science.nasa.gov/3d-resources/space-shuttle-a/)
+
+The model uses Draco geometry compression. The decoder files in `public/draco`
+come from the Three.js distribution and are provided under the
+[MIT license](https://github.com/mrdoob/three.js/blob/dev/LICENSE).
+
 ## Supplemental textures
 
 The Earth cloud and Moon textures in `public/textures/planets` come from the
