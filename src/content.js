@@ -7,7 +7,7 @@ export const EMAIL = 'vitrice91@gmail.com'
 export const PHONE = '+33783034523'
 
 export const HERO = {
-  kicker: 'VITRICE CASCALES — PORTFOLIO 2026',
+  kicker: 'VITRICE CASCALES — FULL-STACK & DATA',
   title: 'Vitrice Cascales',
   role: 'Développeur full-stack & data science — TypeScript · Python · Go',
   desc: 'Je conçois, développe et déploie des applications web complètes, de l’interface à la donnée. J’aime transformer des problématiques métier complexes en produits fiables, performants et simples à utiliser.',

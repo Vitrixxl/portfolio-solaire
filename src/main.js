@@ -7,6 +7,19 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { PLANETS, STOPS } from './content.js'
 import { createUI } from './ui.js'
 
+// Nettoie l'ancien service worker du portfolio qui peut encore servir une
+// interface obsolète sur localhost (header/footer et anciens assets inclus).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    const registrations = await navigator.serviceWorker.getRegistrations()
+    await Promise.all(registrations.map((registration) => registration.unregister()))
+    if ('caches' in window) {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((key) => caches.delete(key)))
+    }
+  }, { once: true })
+}
+
 // ---------------------------------------------------------------- shaders
 
 const NOISE_GLSL = /* glsl */ `
@@ -114,7 +127,11 @@ const STAR_FRAG = /* glsl */ `
 
 const canvas = document.getElementById('scene')
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+const responsivePixelRatio = () => Math.min(
+  window.devicePixelRatio,
+  window.innerWidth <= 900 || window.innerHeight <= 600 ? 1.5 : 2
+)
+renderer.setPixelRatio(responsivePixelRatio())
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.05
@@ -130,7 +147,7 @@ const sunlight = new THREE.PointLight(0xfff1d6, 3.2, 0, 0)
 const spaceFill = new THREE.AmbientLight(0x52647e, 0.035)
 scene.add(sunlight, spaceFill)
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000)
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 500000)
 camera.position.set(0, 60, 150)
 
 const composer = new EffectComposer(renderer)
@@ -568,8 +585,10 @@ const travel = {
   orbitAngle: 0,
   orbitStartAngle: 0,
   orbitEndAngle: 0,
+  orbitDirection: 1,
   keys: new Set(),
   steering: new THREE.Vector2(),
+  touchSteering: new THREE.Vector2(),
   cameraStart: new THREE.Vector3(),
   cameraEnd: new THREE.Vector3(),
   lookStart: new THREE.Vector3(),
@@ -595,6 +614,7 @@ const spacecraftOrbit = {
   radius: 0,
   height: 0,
   speed: 0.42,
+  direction: 1,
 }
 
 function loadSpacecraftModel() {
@@ -664,18 +684,22 @@ let current = 0
 let animating = false
 let transition = { from: 0, to: 0, t0: 0, duration: 2 }
 
-// vitesse de simulation (sélecteur ×½ … ×4) et zoom (barre)
+// Vitesse de rotation et zoom continu, sans contrôle visuel ni paliers.
 let timeScale = 1
+const ZOOM_MIN = 0.0001
+const ZOOM_MAX = 1000
 let zoomTarget = 1
 let zoomLevel = 1
 // dérive continue de la caméra quand l'utilisateur ne fait rien
 let autoYaw = 0
 
 let navHoverEl = null
+const compactInputMedia = window.matchMedia('(max-width: 900px), (pointer: coarse)')
 const ui = createUI({
   onNavigate: (i) => go(i),
   onNavHover: (el) => { navHoverEl = el },
   onTravelToggle: () => toggleTravel(),
+  onOrbit: () => beginOrbitCapture(),
 })
 ui.setActive(0)
 loadSpacecraftModel()
@@ -706,7 +730,11 @@ const _shipRotationMatrix = new THREE.Matrix4()
 // car les planètes bougent)
 function anchorFor(stop, outPos, outLook) {
   if (stop === 0) {
-    outPos.set(-42, 74, 168).multiplyScalar(zoomLevel)
+    const overviewFraming = camera.aspect < 0.78
+      ? Math.min(0.78 / Math.max(camera.aspect, 0.4), 1.55)
+      : 1
+    const overviewZoom = 0.055 + zoomLevel * 0.945
+    outPos.set(-42, 74, 168).multiplyScalar(overviewZoom * overviewFraming)
     outLook.set(20, -4, 0)
     return
   }
@@ -718,15 +746,26 @@ function anchorFor(stop, outPos, outLook) {
   // caméra légèrement côté soleil : on arrive sur la face éclairée de la
   // planète, en surplomb, avec le reste du système qui s'étend derrière
   // plancher pour ne jamais passer sous la surface de la planète
-  const z = Math.max(zoomLevel, 0.24)
+  // Le zoom s'approche asymptotiquement de la surface sans jamais traverser
+  // le modèle, tout en restant continu et sans plage imposée à l'utilisateur.
+  const z = 0.2 + Math.max(zoomLevel, 0) * 0.8
+  const narrowFraming = camera.aspect < 0.78
+    ? Math.min(0.78 / Math.max(camera.aspect, 0.4), 1.55)
+    : 1
   outPos.copy(_pos)
-    .addScaledVector(_dir, -r * 2.0 * z)
-    .addScaledVector(_side, r * 4.8 * z)
-    .addScaledVector(UP, r * 2.3 * z)
+    .addScaledVector(_dir, -r * 2.0 * z * narrowFraming)
+    .addScaledVector(_side, r * 4.8 * z * narrowFraming)
+    .addScaledVector(UP, r * 2.3 * z * narrowFraming)
   // décale le regard pour placer la planète à droite de l'écran (carte à
   // gauche) — décalage réduit sur écran étroit pour ne pas la couper
-  const shift = 1.15 * Math.min(camera.aspect, 1.0)
-  outLook.copy(_pos).addScaledVector(_side, -r * shift)
+  if (camera.aspect < 0.78) {
+    // Sur mobile, les informations sont dans une fiche basse : la planète
+    // reste centrée horizontalement et remonte dans la moitié libre de l'écran.
+    outLook.copy(_pos).addScaledVector(UP, -r * 0.82)
+  } else {
+    const shift = 1.15 * Math.min(camera.aspect, 1.0)
+    outLook.copy(_pos).addScaledVector(_side, -r * shift)
+  }
 }
 
 function orbitPose(stop, angle, radius, height, outPosition, outTangent) {
@@ -795,7 +834,7 @@ function findAimedPlanet() {
 
 function updateSpacecraftOrbit(dt) {
   if (!spacecraftOrbit.active) return
-  spacecraftOrbit.angle += spacecraftOrbit.speed * dt
+  spacecraftOrbit.angle += spacecraftOrbit.speed * spacecraftOrbit.direction * dt
   orbitPose(
     spacecraftOrbit.stop,
     spacecraftOrbit.angle,
@@ -804,6 +843,7 @@ function updateSpacecraftOrbit(dt) {
     spacecraft.position,
     _orbitTangent
   )
+  _orbitTangent.multiplyScalar(spacecraftOrbit.direction)
   quaternionForDirection(_orbitTangent, spacecraft.quaternion)
 }
 
@@ -833,6 +873,7 @@ function startTravel() {
   travel.aimedStop = null
   travel.keys.clear()
   travel.steering.set(0, 0)
+  resetJoystick()
   animating = false
   dragging = false
   navHoverEl = null
@@ -859,9 +900,12 @@ function startTravel() {
       _orbitTarget,
       _orbitTangent
     )
-    travel.flightDirection.copy(_orbitTangent).addScaledVector(UP, 0.04).normalize()
+    _orbitTangent.multiplyScalar(spacecraftOrbit.direction)
+    // La courbe quitte l'orbite dans sa tangente actuelle, puis se réaligne
+    // progressivement sur l'axe que la caméra regardait avant le départ.
+    travel.flightDirection.copy(_travelView).normalize()
     travel.controlA.copy(travel.shipStart)
-      .addScaledVector(travel.flightDirection, Math.max(spacecraftOrbit.radius * 1.8, 6))
+      .addScaledVector(_orbitTangent, Math.max(spacecraftOrbit.radius * 1.8, 6))
       .addScaledVector(UP, spacecraftOrbit.height * 0.5)
     travel.controlB.copy(travel.shipEnd).addScaledVector(travel.flightDirection, -8)
     spacecraftOrbit.active = false
@@ -927,16 +971,21 @@ function beginOrbitCapture(stop = travel.aimedStop) {
   travel.orbitStop = stop
   travel.orbitRadius = Math.max(planet.data.radius * 2.25, 4.2)
   travel.orbitStartAngle = Math.atan2(_orbitRelative.z, _orbitRelative.x)
-  travel.orbitEndAngle = travel.orbitStartAngle + 1.35
   travel.shipStart.copy(spacecraft.position)
   travel.shipStartQuaternion.copy(spacecraft.quaternion)
   travel.cameraStart.copy(camera.position)
   travel.lookStart.copy(lookCurrent)
   travel.previousShipPosition.copy(spacecraft.position)
   travel.keys.clear()
+  resetJoystick()
   travel.aimedStop = null
 
   _travelForwardNow.copy(SHIP_FORWARD).applyQuaternion(spacecraft.quaternion).normalize()
+  _orbitTangent.set(-_orbitRelative.z, 0, _orbitRelative.x)
+  if (_orbitTangent.lengthSq() < 0.000001) _orbitTangent.set(0, 0, 1)
+  else _orbitTangent.normalize()
+  travel.orbitDirection = _travelForwardNow.dot(_orbitTangent) < 0 ? -1 : 1
+  travel.orbitEndAngle = travel.orbitStartAngle + travel.orbitDirection * 1.35
   const distance = spacecraft.position.distanceTo(_orbitPlanetPosition)
   travel.controlA.copy(spacecraft.position)
     .addScaledVector(_travelForwardNow, THREE.MathUtils.clamp(distance * 0.3, 6, 28))
@@ -951,6 +1000,7 @@ function stopTravel() {
   travel.phaseStarted = clock.elapsedTime
   travel.aimedStop = null
   travel.keys.clear()
+  resetJoystick()
   travel.exitCameraStart.copy(camera.position)
   travel.exitLookStart.copy(lookCurrent)
   ui.setTravelPhase('RETOUR EN ORBITE')
@@ -959,6 +1009,7 @@ function stopTravel() {
 function toggleTravel() {
   if (travel.pendingStart) {
     travel.pendingStart = false
+    resetJoystick()
     ui.setTravelMode(false)
     ui.showCard(current)
   } else if (travel.active) stopTravel()
@@ -983,12 +1034,17 @@ function go(i) {
   ui.setActive(target)
 }
 
-// molette = zoom / dézoom (la navigation se fait au clic sur les planètes)
+function setContinuousZoom(value) {
+  zoomTarget = THREE.MathUtils.clamp(value, ZOOM_MIN, ZOOM_MAX)
+  ui.dismissHint()
+}
+
+// La molette applique un facteur exponentiel : le zoom reste fluide et peut
+// continuer dans les deux directions sans être lié à une barre ou à des crans.
 window.addEventListener('wheel', (e) => {
   if (travel.active || travel.pendingStart) return
-  ui.dismissHint()
-  zoomRange.value = THREE.MathUtils.clamp(Number(zoomRange.value) - e.deltaY * 0.05, 0, 100)
-  applyZoomSlider()
+  const delta = THREE.MathUtils.clamp(e.deltaY, -240, 240)
+  setContinuousZoom(zoomTarget * Math.exp(delta * 0.0018))
 }, { passive: true })
 
 // clavier
@@ -1022,19 +1078,128 @@ window.addEventListener('keyup', (e) => {
   travel.keys.delete(inputKey(e))
 })
 
-window.addEventListener('blur', () => travel.keys.clear())
+window.addEventListener('blur', () => {
+  travel.keys.clear()
+  resetJoystick()
+})
 
-// tactile
-let touchY = null
-window.addEventListener('touchstart', (e) => {
-  if (!travel.active && !travel.pendingStart) touchY = e.touches[0].clientY
-}, { passive: true })
-window.addEventListener('touchend', (e) => {
+// Joystick tactile du mode voyage. Le déplacement visuel du bouton conserve
+// le sens du doigt ; les valeurs sont converties vers la convention de vol
+// existante (haut = piquer, bas = cabrer).
+const flightJoystick = document.getElementById('flight-joystick')
+const flightJoystickKnob = document.getElementById('flight-joystick-knob')
+let joystickPointerId = null
+
+function updateJoystickFromPointer(e) {
+  const bounds = flightJoystick.getBoundingClientRect()
+  const radius = Math.max(bounds.width / 2, 1)
+  let x = (e.clientX - (bounds.left + radius)) / radius
+  let y = (e.clientY - (bounds.top + radius)) / radius
+  const length = Math.hypot(x, y)
+  if (length > 1) {
+    x /= length
+    y /= length
+  }
+  const knobTravel = bounds.width * 0.31
+  flightJoystickKnob.style.setProperty('--stick-x', `${x * knobTravel}px`)
+  flightJoystickKnob.style.setProperty('--stick-y', `${y * knobTravel}px`)
+  travel.touchSteering.set(-x, -y)
+}
+
+function resetJoystick() {
+  const capturedPointer = joystickPointerId
+  joystickPointerId = null
+  travel.touchSteering.set(0, 0)
+  flightJoystick.classList.remove('active')
+  flightJoystickKnob.style.setProperty('--stick-x', '0px')
+  flightJoystickKnob.style.setProperty('--stick-y', '0px')
+  if (capturedPointer !== null && flightJoystick.hasPointerCapture?.(capturedPointer)) {
+    flightJoystick.releasePointerCapture(capturedPointer)
+  }
+}
+
+flightJoystick.addEventListener('pointerdown', (e) => {
+  if (!travel.active || travel.phase === 'exit') return
+  e.preventDefault()
+  joystickPointerId = e.pointerId
+  flightJoystick.setPointerCapture(e.pointerId)
+  flightJoystick.classList.add('active')
+  updateJoystickFromPointer(e)
+})
+
+flightJoystick.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== joystickPointerId) return
+  e.preventDefault()
+  updateJoystickFromPointer(e)
+})
+
+flightJoystick.addEventListener('pointerup', (e) => {
+  if (e.pointerId === joystickPointerId) resetJoystick()
+})
+flightJoystick.addEventListener('pointercancel', resetJoystick)
+flightJoystick.addEventListener('lostpointercapture', resetJoystick)
+
+// Sur le canvas uniquement : swipe horizontal/vertical pour changer d'escale,
+// pincement pour zoomer. Les gestes sur les cartes, le menu et les contrôles ne
+// déclenchent donc plus de navigation involontaire.
+const touchDistance = (touches) => Math.hypot(
+  touches[0].clientX - touches[1].clientX,
+  touches[0].clientY - touches[1].clientY
+)
+let canvasGesture = null
+let pinchStartDistance = 0
+let pinchStartZoom = 1
+let pinching = false
+let suppressCanvasTapUntil = 0
+
+canvas.addEventListener('touchstart', (e) => {
   if (travel.active || travel.pendingStart) return
-  if (touchY === null) return
-  const dy = touchY - e.changedTouches[0].clientY
-  if (Math.abs(dy) > 45) go(current + Math.sign(dy))
-  touchY = null
+  if (e.touches.length >= 2) {
+    pinching = true
+    pinchStartDistance = Math.max(touchDistance(e.touches), 1)
+    pinchStartZoom = zoomTarget
+    canvasGesture = null
+    suppressCanvasTapUntil = performance.now() + 350
+  } else if (e.touches.length === 1) {
+    const touch = e.touches[0]
+    canvasGesture = { id: touch.identifier, x: touch.clientX, y: touch.clientY }
+  }
+}, { passive: true })
+
+canvas.addEventListener('touchmove', (e) => {
+  if (travel.active || travel.pendingStart || e.touches.length < 2) return
+  if (!pinching) {
+    pinching = true
+    pinchStartDistance = Math.max(touchDistance(e.touches), 1)
+    pinchStartZoom = zoomTarget
+  }
+  const scale = touchDistance(e.touches) / pinchStartDistance
+  setContinuousZoom(pinchStartZoom / Math.max(scale, 0.01))
+  canvasGesture = null
+  suppressCanvasTapUntil = performance.now() + 350
+}, { passive: true })
+
+canvas.addEventListener('touchend', (e) => {
+  if (travel.active || travel.pendingStart) return
+  if (pinching) {
+    if (e.touches.length < 2) pinching = false
+    canvasGesture = null
+    suppressCanvasTapUntil = performance.now() + 350
+    return
+  }
+  if (!canvasGesture) return
+  const touch = Array.from(e.changedTouches).find((item) => item.identifier === canvasGesture.id)
+  if (!touch) return
+  const dx = touch.clientX - canvasGesture.x
+  const dy = touch.clientY - canvasGesture.y
+  const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy
+  if (Math.abs(dominantDelta) > 48) go(current + (dominantDelta < 0 ? 1 : -1))
+  canvasGesture = null
+}, { passive: true })
+
+canvas.addEventListener('touchcancel', () => {
+  canvasGesture = null
+  pinching = false
 }, { passive: true })
 
 // parallaxe souris + drag pour orbiter autour de l'astre courant
@@ -1087,7 +1252,11 @@ window.addEventListener('pointerup', (e) => {
   dragging = false
   canvas.classList.remove('dragging')
   // clic (et non drag) sur le canvas : voyage vers l'astre visé
-  if (e.target === canvas && Math.hypot(e.clientX - downX, e.clientY - downY) < 10) {
+  if (
+    e.target === canvas
+    && performance.now() > suppressCanvasTapUntil
+    && Math.hypot(e.clientX - downX, e.clientY - downY) < 10
+  ) {
     const ndcX = (e.clientX / window.innerWidth) * 2 - 1
     const ndcY = -((e.clientY / window.innerHeight) * 2 - 1)
     const stop = pickStop(ndcX, ndcY)
@@ -1095,31 +1264,16 @@ window.addEventListener('pointerup', (e) => {
   }
 })
 
-// barre de zoom : mapping exponentiel, 50 = distance nominale
-const zoomRange = document.getElementById('zoom-range')
-const applyZoomSlider = () => {
-  // plage large : ×0.15 (très proche) à ×7 (très loin)
-  zoomTarget = Math.pow(2.4, ((50 - Number(zoomRange.value)) / 50) * 2.2)
-  ui.dismissHint()
+// Slider unique pour la vitesse orbitale et la rotation des astres.
+const speedRange = document.getElementById('speed-range')
+const speedOutput = document.getElementById('speed-output')
+const applySpeedRange = () => {
+  timeScale = Number(speedRange.value)
+  speedOutput.value = `×${speedRange.value}`
+  speedRange.style.setProperty('--speed-progress', `${((timeScale - 1) / 9) * 100}%`)
 }
-zoomRange.addEventListener('input', applyZoomSlider)
-document.getElementById('zoom-in').addEventListener('click', () => {
-  zoomRange.value = Math.min(100, Number(zoomRange.value) + 12)
-  applyZoomSlider()
-})
-document.getElementById('zoom-out').addEventListener('click', () => {
-  zoomRange.value = Math.max(0, Number(zoomRange.value) - 12)
-  applyZoomSlider()
-})
-
-// sélecteur de vitesse de simulation
-const speedButtons = document.querySelectorAll('#hud-speed button[data-speed]')
-speedButtons.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    timeScale = Number(btn.dataset.speed)
-    speedButtons.forEach((b) => b.classList.toggle('active', b === btn))
-  })
-})
+speedRange.addEventListener('input', applySpeedRange)
+applySpeedRange()
 
 // ---------------------------------------------------------------- boucle
 
@@ -1217,10 +1371,12 @@ function updateTravelCamera(dt, t) {
       ui.setTravelPhase('PILOTAGE LIBRE')
     }
   } else if (travel.phase === 'flight') {
-    const turn = (hasTravelKey('q', 'a', 'ArrowLeft') ? 1 : 0)
+    const keyboardTurn = (hasTravelKey('q', 'a', 'ArrowLeft') ? 1 : 0)
       - (hasTravelKey('d', 'ArrowRight') ? 1 : 0)
-    const vertical = (hasTravelKey('z', 'w', 'ArrowUp') ? 1 : 0)
+    const keyboardVertical = (hasTravelKey('z', 'w', 'ArrowUp') ? 1 : 0)
       - (hasTravelKey('s', 'ArrowDown') ? 1 : 0)
+    const turn = THREE.MathUtils.clamp(keyboardTurn + travel.touchSteering.x, -1, 1)
+    const vertical = THREE.MathUtils.clamp(keyboardVertical + travel.touchSteering.y, -1, 1)
     const steerEase = 1 - Math.exp(-7 * dt)
     travel.steering.x += (turn - travel.steering.x) * steerEase
     travel.steering.y += (vertical - travel.steering.y) * steerEase
@@ -1263,6 +1419,7 @@ function updateTravelCamera(dt, t) {
       _orbitTarget,
       _orbitTangent
     )
+    _orbitTangent.multiplyScalar(travel.orbitDirection)
     travel.controlB.copy(_orbitTarget)
       .addScaledVector(_orbitTangent, -travel.orbitRadius * 1.8)
       .addScaledVector(UP, height * 0.45)
@@ -1293,11 +1450,25 @@ function updateTravelCamera(dt, t) {
       travel.phase = 'idle'
       travel.aimedStop = null
       travel.keys.clear()
+      resetJoystick()
       spacecraftOrbit.active = true
       spacecraftOrbit.stop = current
       spacecraftOrbit.angle = travel.orbitEndAngle
       spacecraftOrbit.radius = travel.orbitRadius
       spacecraftOrbit.height = height
+      spacecraftOrbit.direction = travel.orbitDirection
+      // Verrouille exactement la pose utilisée par la boucle orbitale avant
+      // de changer de phase, évitant toute rotation de 180° à la frame suivante.
+      orbitPose(
+        spacecraftOrbit.stop,
+        spacecraftOrbit.angle,
+        spacecraftOrbit.radius,
+        spacecraftOrbit.height,
+        spacecraft.position,
+        _orbitTangent
+      )
+      _orbitTangent.multiplyScalar(spacecraftOrbit.direction)
+      quaternionForDirection(_orbitTangent, spacecraft.quaternion)
       spacecraft.scale.setScalar(SHIP_SCALE)
       spacecraft.userData.visual.rotation.set(0, 0, 0)
       setSpacecraftThrust(false)
@@ -1327,6 +1498,7 @@ function updateTravelCamera(dt, t) {
       travel.active = false
       travel.phase = 'idle'
       travel.steering.set(0, 0)
+      resetJoystick()
       spacecraft.visible = false
       spacecraft.scale.setScalar(SHIP_SCALE)
       spacecraft.userData.visual.rotation.set(0, 0, 0)
@@ -1446,6 +1618,7 @@ function tick() {
   hoveredStop = picked !== null && picked !== current ? picked : null
   const orbitAimStop = travel.active && travel.phase === 'flight' ? travel.aimedStop : null
   const reticleStop = orbitAimStop ?? hoveredStop
+  ui.setOrbitTarget(orbitAimStop)
 
   // petit curseur : suit la souris avec un léger retard
   cursorTargetPos.set(pointerPx.x - cw / 2, ch / 2 - pointerPx.y)
@@ -1481,7 +1654,7 @@ function tick() {
       retOpacityTarget = 0.85
 
       labelEl.textContent = orbitAimStop !== null
-        ? `${STOPS[reticleStop].name} — O · ALLER EN ORBITE`
+        ? `${STOPS[reticleStop].name} — ${compactInputMedia.matches ? 'TOUCHER ORBITE' : 'O · ALLER EN ORBITE'}`
         : `${STOPS[reticleStop].name} — ${STOPS[reticleStop].section}`.toUpperCase()
       const lx = retPosX + cw / 2 + retScaleTarget * 0.8 + 18
       const ly = ch / 2 - retPosY - retScaleTarget * 0.8 - 10
@@ -1538,23 +1711,6 @@ function tick() {
     })
   }
 
-  // HUD coordonnées
-  if (travel.active) {
-    const flightDistance = spacecraft.position.length()
-    ui.setCoords(travel.phase === 'exit'
-      ? 'RETOUR · PILOTE AUTO'
-      : `VOL · ${flightDistance.toFixed(0)} MKM`)
-  } else if (!animating) {
-    if (current === 0) {
-      ui.setCoords('SOL · 0.00 UA')
-    } else {
-      const d = planets[current - 1].mesh.position.length()
-      ui.setCoords(`${PLANETS[current - 1].name.toUpperCase()} · ${(d / 37).toFixed(2)} UA`)
-    }
-  } else {
-    ui.setCoords(`TRANSIT · ${camera.position.length().toFixed(0)} MKM`)
-  }
-
   composer.render()
   // curseur/réticule dessinés par-dessus (hors bloom, toujours nets)
   renderer.autoClear = false
@@ -1571,6 +1727,9 @@ window.addEventListener('resize', () => {
   uiCam.top = window.innerHeight / 2
   uiCam.bottom = -window.innerHeight / 2
   uiCam.updateProjectionMatrix()
+  const pixelRatio = responsivePixelRatio()
+  renderer.setPixelRatio(pixelRatio)
+  composer.setPixelRatio(pixelRatio)
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
 })

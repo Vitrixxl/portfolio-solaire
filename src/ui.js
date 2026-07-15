@@ -2,11 +2,14 @@ import { HERO, PLANETS, STOPS } from './content.js'
 
 const pad = (n) => String(n).padStart(2, '0')
 
-export function createUI({ onNavigate, onNavHover = () => {}, onTravelToggle = () => {} }) {
+export function createUI({
+  onNavigate,
+  onNavHover = () => {},
+  onTravelToggle = () => {},
+  onOrbit = () => {},
+}) {
   const cardsEl = document.getElementById('hud-cards')
   const navEl = document.getElementById('hud-nav')
-  const counterEl = document.getElementById('hud-counter')
-  const coordsEl = document.getElementById('hud-coords')
   const statusEl = document.getElementById('hud-status')
   const hintEl = document.getElementById('hud-hint')
   const travelToggleEl = document.getElementById('travel-toggle')
@@ -14,9 +17,13 @@ export function createUI({ onNavigate, onNavHover = () => {}, onTravelToggle = (
   const travelHudEl = document.getElementById('travel-hud')
   const travelPhaseEl = document.getElementById('travel-phase')
   const travelExitEl = document.getElementById('travel-exit')
+  const mobileFlightControlsEl = document.getElementById('mobile-flight-controls')
+  const mobileOrbitEl = document.getElementById('mobile-orbit')
+  const mobileOrbitLabelEl = document.getElementById('mobile-orbit-label')
 
   travelToggleEl.addEventListener('click', onTravelToggle)
   travelExitEl.addEventListener('click', onTravelToggle)
+  mobileOrbitEl.addEventListener('click', onOrbit)
 
   // ----- cartes -----
   const heroCard = document.createElement('div')
@@ -62,6 +69,8 @@ export function createUI({ onNavigate, onNavHover = () => {}, onTravelToggle = (
   const navItems = STOPS.map((s, i) => {
     const btn = document.createElement('button')
     btn.className = 'nav-item'
+    btn.type = 'button'
+    btn.setAttribute('aria-label', `Aller à ${s.name}, ${s.section}`)
     btn.innerHTML = `<span class="nav-label">${s.name}<em>${s.section}</em></span><span class="nav-tick"></span>`
     btn.addEventListener('click', () => onNavigate(i))
     btn.addEventListener('mouseenter', () => onNavHover(btn))
@@ -71,6 +80,21 @@ export function createUI({ onNavigate, onNavHover = () => {}, onTravelToggle = (
   })
 
   let hintDismissed = false
+  let orbitTargetStop = null
+
+  const updateOrbitTarget = (stop) => {
+    const available = Number.isInteger(stop) && stop > 0 && Boolean(STOPS[stop])
+    const nextStop = available ? stop : null
+    if (nextStop === orbitTargetStop) return
+    orbitTargetStop = nextStop
+    mobileOrbitEl.disabled = !available
+    mobileOrbitEl.classList.toggle('available', available)
+    mobileOrbitLabelEl.textContent = available ? `ORBITE · ${STOPS[stop].name.toUpperCase()}` : 'VISEZ UNE PLANÈTE'
+    mobileOrbitEl.setAttribute(
+      'aria-label',
+      available ? `Aller en orbite autour de ${STOPS[stop].name}` : 'Visez une planète pour aller en orbite'
+    )
+  }
 
   return {
     showCard(i) {
@@ -82,11 +106,17 @@ export function createUI({ onNavigate, onNavHover = () => {}, onTravelToggle = (
       statusEl.textContent = 'TRANSIT…'
     },
     setActive(i) {
-      navItems.forEach((b, j) => b.classList.toggle('active', i === j))
-      counterEl.innerHTML = `${pad(i)}&nbsp;/&nbsp;${pad(STOPS.length - 1)}`
-    },
-    setCoords(text) {
-      coordsEl.textContent = text
+      navItems.forEach((b, j) => {
+        const active = i === j
+        b.classList.toggle('active', active)
+        if (active) b.setAttribute('aria-current', 'page')
+        else b.removeAttribute('aria-current')
+      })
+      if (window.matchMedia('(max-width: 900px), (pointer: coarse)').matches) {
+        const activeItem = navItems[i]
+        const left = activeItem.offsetLeft - (navEl.clientWidth - activeItem.offsetWidth) / 2
+        navEl.scrollTo({ left: Math.max(0, left), behavior: 'smooth' })
+      }
     },
     dismissHint() {
       if (hintDismissed) return
@@ -99,10 +129,15 @@ export function createUI({ onNavigate, onNavHover = () => {}, onTravelToggle = (
       travelToggleEl.setAttribute('aria-pressed', String(active))
       travelToggleLabelEl.textContent = active ? 'QUITTER LE VOYAGE' : 'MODE VOYAGE'
       travelHudEl.setAttribute('aria-hidden', String(!active))
+      mobileFlightControlsEl.setAttribute('aria-hidden', String(!active))
+      if (!active) updateOrbitTarget(null)
     },
     setTravelPhase(label) {
       travelPhaseEl.textContent = label
       statusEl.textContent = `MODE VOYAGE — ${label}`
+    },
+    setOrbitTarget(stop) {
+      updateOrbitTarget(stop)
     },
   }
 }
